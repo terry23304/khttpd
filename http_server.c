@@ -9,13 +9,10 @@
 
 #define CRLF "\r\n"
 
-#define HTTP_RESPONSE_200_KEEPALIVE_DUMMY \
-    "HTTP/1.1 200 OK\r\n"                 \
-    "Server: " KBUILD_MODNAME             \
-    "\r\n"                                \
-    "Content-Type: text/html\r\n"         \
-    "Connection: Keep-Alive\r\n"          \
-    "Keep-Alive: timeout=5, max=1000\r\n\r\n"
+#define HTTP_RESPONSE_200_KEEPALIVE_DUMMY                        \
+    "HTTP/1.1 200 OK" CRLF "Server: KBUILD_MODNAME" CRLF         \
+    "Content-Type: text/html" CRLF "Connection: Keep-Alive" CRLF \
+    "Keep-Alive: timeout=5, max=1000" CRLF CRLF
 #define HTTP_RESPONSE_501_KEEPALIVE                                    \
     ""                                                                 \
     "HTTP/1.1 501 Not Implemented" CRLF "Server: " KBUILD_MODNAME CRLF \
@@ -115,23 +112,39 @@ static void directory_listing(struct http_request *request)
         pr_info("Open file failed");
         http_server_send(request->socket, HTTP_RESPONSE_404,
                          strlen(HTTP_RESPONSE_404));
+        filp_close(fp, NULL);
         return;
     }
 
     http_server_send(request->socket, HTTP_RESPONSE_200_KEEPALIVE_DUMMY,
                      strlen(HTTP_RESPONSE_200_KEEPALIVE_DUMMY));
 
-    snprintf(buf, SEND_BUFFER_SIZE, "%s%s%s%s", "<html><head><style>\r\n",
-             "body{font-family: monospace; font-size: 15px;}\r\n",
-             "td {padding: 1.5px 6px;}\r\n",
-             "</style></head><body><table>\r\n");
-    http_server_send(request->socket, buf, strlen(buf));
+    if (S_ISDIR(fp->f_inode->i_mode)) {
+        snprintf(buf, SEND_BUFFER_SIZE, "%s%s%s%s", "<html><head><style>\r\n",
+                 "body{font-family: monospace; font-size: 15px;}\r\n",
+                 "td {padding: 1.5px 6px;}\r\n",
+                 "</style></head><body><table>\r\n");
+        http_server_send(request->socket, buf, strlen(buf));
 
-    iterate_dir(fp, &request->dir_context);
-    snprintf(buf, SEND_BUFFER_SIZE, "</table></body></html>\r\n");
-    http_server_send(request->socket, buf, strlen(buf));
+        iterate_dir(fp, &request->dir_context);
+        snprintf(buf, SEND_BUFFER_SIZE, "</table></body></html>\r\n");
+        http_server_send(request->socket, buf, strlen(buf));
+    } else if (S_ISREG(fp->f_inode->i_mode)) {
+        http_server_send(request->socket, buf, strlen(buf));
+
+        char *file_content = kmalloc(fp->f_inode->i_size, GFP_KERNEL);
+        if (!file_content) {
+            pr_info("malloc failed");
+            filp_close(fp, NULL);
+            return;
+        }
+
+        int ret = kernel_read(fp, file_content, fp->f_inode->i_size, 0);
+        http_server_send(request->socket, file_content, ret);
+        kfree(file_content);
+    }
+
     filp_close(fp, NULL);
-
     return;
 }
 
