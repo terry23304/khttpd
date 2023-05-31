@@ -7,6 +7,7 @@
 #include <net/sock.h>
 
 #include "http_server.h"
+#include "mime_map.h"
 
 #define DEFAULT_PORT 8081
 #define DEFAULT_BACKLOG 100
@@ -162,6 +163,8 @@ static int __init khttpd_init(void)
     }
     param.listen_socket = listen_socket;
 
+    init_mime_map_table();
+
     khttpd_wq = alloc_workqueue(MODULE_NAME, 0, 0);
     http_server = kthread_run(http_server_daemon, &param, KBUILD_MODNAME);
     if (IS_ERR(http_server)) {
@@ -176,6 +179,7 @@ static void __exit khttpd_exit(void)
 {
     send_sig(SIGTERM, http_server, 1);
     kthread_stop(http_server);
+    free_mime_map_table();
     close_listen_socket(listen_socket);
     destroy_workqueue(khttpd_wq);
     pr_info("module unloaded\n");

@@ -1,7 +1,0 @@
-{
-    "files.associations": {
-        "http_parser.h": "c",
-        "http_server.h": "c",
-        "*.tcc": "c"
-    }
-}

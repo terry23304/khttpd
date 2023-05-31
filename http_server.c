@@ -6,6 +6,7 @@
 #include <linux/sched/signal.h>
 #include <linux/tcp.h>
 #include "http_parser.h"
+#include "mime_map.h"
 
 #define CRLF "\r\n"
 
@@ -116,10 +117,10 @@ static void directory_listing(struct http_request *request)
         return;
     }
 
-    http_server_send(request->socket, HTTP_RESPONSE_200_KEEPALIVE_DUMMY,
-                     strlen(HTTP_RESPONSE_200_KEEPALIVE_DUMMY));
-
     if (S_ISDIR(fp->f_inode->i_mode)) {
+        http_server_send(request->socket, HTTP_RESPONSE_200_KEEPALIVE_DUMMY,
+                         strlen(HTTP_RESPONSE_200_KEEPALIVE_DUMMY));
+
         snprintf(buf, SEND_BUFFER_SIZE, "%s%s%s%s", "<html><head><style>\r\n",
                  "body{font-family: monospace; font-size: 15px;}\r\n",
                  "td {padding: 1.5px 6px;}\r\n",
@@ -130,6 +131,10 @@ static void directory_listing(struct http_request *request)
         snprintf(buf, SEND_BUFFER_SIZE, "</table></body></html>\r\n");
         http_server_send(request->socket, buf, strlen(buf));
     } else if (S_ISREG(fp->f_inode->i_mode)) {
+        const char *extension = strchr(request->request_url, '.');
+        snprintf(buf, SEND_BUFFER_SIZE, "%s%s%s%s", "HTTP/1.1 200 OK\r\n",
+                 "Content-Type: ", get_mime_type(extension),
+                 "\r\nConnection: Keep-Alive\r\n\r\n");
         http_server_send(request->socket, buf, strlen(buf));
 
         char *file_content = kmalloc(fp->f_inode->i_size, GFP_KERNEL);
