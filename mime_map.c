@@ -131,7 +131,11 @@ const char *get_mime_type(const char *extension)
     if (!extension)
         return "text/plain";
 
-    struct mime_map_entry *entry;
+    struct mime_map_entry *entry =
+        kmalloc(sizeof(struct mime_map_entry), GFP_KERNEL);
+
+    if (!entry)
+        return "text/plain";
     struct hlist_node *node;
 
     hash_for_each_possible(mime_map_table, entry, node, mime_hash(extension))

@@ -6,6 +6,7 @@
 #include <linux/version.h>
 #include <net/sock.h>
 
+#include "content_cache.h"
 #include "http_server.h"
 #include "mime_map.h"
 
@@ -164,6 +165,7 @@ static int __init khttpd_init(void)
     param.listen_socket = listen_socket;
 
     init_mime_map_table();
+    init_content_cache_table();
 
     khttpd_wq = alloc_workqueue(MODULE_NAME, 0, 0);
     http_server = kthread_run(http_server_daemon, &param, KBUILD_MODNAME);
@@ -180,6 +182,7 @@ static void __exit khttpd_exit(void)
     send_sig(SIGTERM, http_server, 1);
     kthread_stop(http_server);
     free_mime_map_table();
+    free_content_cache_table();
     close_listen_socket(listen_socket);
     destroy_workqueue(khttpd_wq);
     pr_info("module unloaded\n");

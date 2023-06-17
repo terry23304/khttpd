@@ -5,6 +5,7 @@
 #include <linux/kthread.h>
 #include <linux/sched/signal.h>
 #include <linux/tcp.h>
+#include "content_cache.h"
 #include "http_parser.h"
 #include "mime_map.h"
 
@@ -27,6 +28,7 @@
 
 #define RECV_BUFFER_SIZE 4096
 #define SEND_BUFFER_SIZE 256
+#define CACHE_BUFFER_SIZE 4096
 #define REQUEST_URL_SIZE 64
 #define DIR "/home/terry/Documents/linux-2023/khttpd"
 
@@ -38,6 +40,8 @@ struct http_request {
     enum http_method method;
     char request_url[128];
     int complete;
+    char cache_buffer[CACHE_BUFFER_SIZE];
+    size_t cache_buffer_size;
     struct dir_context dir_context;
     struct list_head node;
     struct work_struct khttpd_work;
@@ -84,13 +88,14 @@ static int tracedir(struct dir_context *dir_context,
                     u64 ino,
                     unsigned int d_type)
 {
-    if (strcmp(name, ".") && strcmp(name, "..")) {
+    if (strcmp(name, ".")) {
         struct http_request *request =
             container_of(dir_context, struct http_request, dir_context);
         char buf[SEND_BUFFER_SIZE] = {0};
 
         snprintf(buf, SEND_BUFFER_SIZE,
                  "<tr><td><a href=\"%s\">%s</a></td></tr>\r\n", name, name);
+        strncat(request->cache_buffer, buf, strlen(buf));
         http_server_send(request->socket, buf, strlen(buf));
     }
 
@@ -104,22 +109,37 @@ static void directory_listing(struct http_request *request)
     char request_url[REQUEST_URL_SIZE] = {0};
 
     request->dir_context.actor = tracedir;
+    memset(request->cache_buffer, 0, CACHE_BUFFER_SIZE);
 
     snprintf(request_url, REQUEST_URL_SIZE, "%s%s", DIR, request->request_url);
+
+    strncpy(request->cache_buffer, get_content(request_url), CACHE_BUFFER_SIZE);
+    if (strlen(request->cache_buffer) != 0) {
+        http_server_send(request->socket, request->cache_buffer,
+                         strlen(request->cache_buffer));
+        return;
+    }
+
     fp = filp_open(request_url, O_RDONLY, 0);
-    pr_info("request_url: %s\n", request_url);
 
     if (IS_ERR(fp)) {
         pr_info("Open file failed");
         http_server_send(request->socket, HTTP_RESPONSE_404,
                          strlen(HTTP_RESPONSE_404));
         filp_close(fp, NULL);
+        strncat(request->cache_buffer, HTTP_RESPONSE_404,
+                strlen(HTTP_RESPONSE_404));
         return;
     }
 
     if (S_ISDIR(fp->f_inode->i_mode)) {
+        request->cache_buffer_size = 0;
+
         http_server_send(request->socket, HTTP_RESPONSE_200_KEEPALIVE_DUMMY,
                          strlen(HTTP_RESPONSE_200_KEEPALIVE_DUMMY));
+
+        strncat(request->cache_buffer, HTTP_RESPONSE_200_KEEPALIVE_DUMMY,
+                strlen(HTTP_RESPONSE_200_KEEPALIVE_DUMMY));
 
         snprintf(buf, SEND_BUFFER_SIZE, "%s%s%s%s", "<html><head><style>\r\n",
                  "body{font-family: monospace; font-size: 15px;}\r\n",
@@ -127,15 +147,21 @@ static void directory_listing(struct http_request *request)
                  "</style></head><body><table>\r\n");
         http_server_send(request->socket, buf, strlen(buf));
 
+        strncat(request->cache_buffer, buf, strlen(buf));
+
         iterate_dir(fp, &request->dir_context);
         snprintf(buf, SEND_BUFFER_SIZE, "</table></body></html>\r\n");
         http_server_send(request->socket, buf, strlen(buf));
+
+        strncat(request->cache_buffer, buf, strlen(buf));
     } else if (S_ISREG(fp->f_inode->i_mode)) {
         const char *extension = strchr(request->request_url, '.');
         snprintf(buf, SEND_BUFFER_SIZE, "%s%s%s%s", "HTTP/1.1 200 OK\r\n",
                  "Content-Type: ", get_mime_type(extension),
                  "\r\nConnection: Keep-Alive\r\n\r\n");
         http_server_send(request->socket, buf, strlen(buf));
+
+        strncat(request->cache_buffer, buf, strlen(buf));
 
         char *file_content = kmalloc(fp->f_inode->i_size, GFP_KERNEL);
         if (!file_content) {
@@ -146,8 +172,12 @@ static void directory_listing(struct http_request *request)
 
         int ret = kernel_read(fp, file_content, fp->f_inode->i_size, 0);
         http_server_send(request->socket, file_content, ret);
+
+        strncat(request->cache_buffer, file_content, strlen(file_content));
         kfree(file_content);
     }
+
+    insert_content_cache(request_url, request->cache_buffer);
 
     filp_close(fp, NULL);
     return;
