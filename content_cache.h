@@ -5,10 +5,11 @@
 #include <linux/spinlock.h>
 
 struct content_cache_entry {
-    const char *request_url;
-    const char *response;
+    char *request_url;
+    char *response;
     struct hlist_node node;
     spinlock_t lock;
+    void *timer;
 };
 
 int request_hash(const char *request_url);

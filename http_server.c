@@ -6,8 +6,8 @@
 #include <linux/sched/signal.h>
 #include <linux/tcp.h>
 #include "content_cache.h"
-#include "http_parser.h"
 #include "mime_map.h"
+#include "timer.h"
 
 #define CRLF "\r\n"
 
@@ -28,24 +28,11 @@
 
 #define RECV_BUFFER_SIZE 4096
 #define SEND_BUFFER_SIZE 256
-#define CACHE_BUFFER_SIZE 4096
 #define REQUEST_URL_SIZE 64
 #define DIR "/home/terry/Documents/linux-2023/khttpd"
 
 struct httpd_service daemon = {.is_stopped = false};
 extern struct workqueue_struct *khttpd_wq;
-
-struct http_request {
-    struct socket *socket;
-    enum http_method method;
-    char request_url[128];
-    int complete;
-    char cache_buffer[CACHE_BUFFER_SIZE];
-    size_t cache_buffer_size;
-    struct dir_context dir_context;
-    struct list_head node;
-    struct work_struct khttpd_work;
-};
 
 static int http_server_recv(struct socket *sock, char *buf, size_t size)
 {
@@ -107,14 +94,17 @@ static void directory_listing(struct http_request *request)
     struct file *fp;
     char buf[SEND_BUFFER_SIZE] = {0};
     char request_url[REQUEST_URL_SIZE] = {0};
+    char *response;
 
     request->dir_context.actor = tracedir;
     memset(request->cache_buffer, 0, CACHE_BUFFER_SIZE);
 
     snprintf(request_url, REQUEST_URL_SIZE, "%s%s", DIR, request->request_url);
 
-    strncpy(request->cache_buffer, get_content(request_url), CACHE_BUFFER_SIZE);
-    if (strlen(request->cache_buffer) != 0) {
+    response = get_content(request_url);
+    strncpy(request->cache_buffer, response, strlen(response));
+
+    if (strlen(response) != 0) {
         http_server_send(request->socket, request->cache_buffer,
                          strlen(request->cache_buffer));
         return;
@@ -133,8 +123,6 @@ static void directory_listing(struct http_request *request)
     }
 
     if (S_ISDIR(fp->f_inode->i_mode)) {
-        request->cache_buffer_size = 0;
-
         http_server_send(request->socket, HTTP_RESPONSE_200_KEEPALIVE_DUMMY,
                          strlen(HTTP_RESPONSE_200_KEEPALIVE_DUMMY));
 
@@ -191,6 +179,7 @@ static int http_server_response(struct http_request *request, int keep_alive)
         return 0;
     }
 
+    handle_expired_timers();
     directory_listing(request);
 
     return 0;
