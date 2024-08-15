@@ -48,9 +48,9 @@ static inline void prio_queue_swap(prio_queue_t *ptr, size_t i, size_t j)
 static size_t prio_queue_sink(prio_queue_t *ptr, size_t k)
 {
     size_t nalloc = atomic_read(&ptr->nalloc);
+    size_t j = (k << 1);
 
     while ((k << 1) <= nalloc) {
-        size_t j = (k << 1);
         if (j < nalloc && ptr->comp(ptr->priv[j + 1], ptr->priv[j]))
             j++;
         if (!ptr->comp(ptr->priv[j], ptr->priv[k]))
@@ -64,16 +64,13 @@ static size_t prio_queue_sink(prio_queue_t *ptr, size_t k)
 
 static bool prio_queue_delmin(prio_queue_t *ptr)
 {
-    size_t nalloc;
     timer_node *node = NULL;
-    struct http_request *worker = NULL;
-    struct content_cache_entry *entry = NULL;
 
     do {
         if (prio_queue_is_empty(ptr))
             return true;
 
-        nalloc = atomic_read(&ptr->nalloc);
+        size_t nalloc = atomic_read(&ptr->nalloc);
         prio_queue_swap(ptr, 1, nalloc);
 
         if (nalloc == atomic_read(&ptr->nalloc)) {
@@ -98,9 +95,6 @@ static inline bool prio_queue_cmpxchg(timer_node **var,
 {
     bool ret;
     union u64 {
-        struct {
-            int low, high;
-        } s;
         long long ui;
     } cmp = {.ui = *old}, with = {.ui = neu};
 

@@ -5,6 +5,7 @@
 #include <linux/kthread.h>
 #include <linux/sched/signal.h>
 #include <linux/tcp.h>
+#include <linux/version.h>
 #include "content_cache.h"
 #include "mime_map.h"
 #include "timer.h"
@@ -68,12 +69,18 @@ static int http_server_send(struct socket *sock, const char *buf, size_t size)
     return done;
 }
 
-static int tracedir(struct dir_context *dir_context,
-                    const char *name,
-                    int namelen,
-                    loff_t offset,
-                    u64 ino,
-                    unsigned int d_type)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
+#define TRACEDIR_RETURN_TYPE bool
+#else
+#define TRACEDIR_RETURN_TYPE int
+#endif
+
+static TRACEDIR_RETURN_TYPE tracedir(struct dir_context *dir_context,
+                                     const char *name,
+                                     int namelen,
+                                     loff_t offset,
+                                     u64 ino,
+                                     unsigned int d_type)
 {
     if (strcmp(name, ".")) {
         struct http_request *request =
@@ -86,7 +93,7 @@ static int tracedir(struct dir_context *dir_context,
         http_server_send(request->socket, buf, strlen(buf));
     }
 
-    return 0;
+    return false;
 }
 
 static void directory_listing(struct http_request *request)
@@ -94,7 +101,7 @@ static void directory_listing(struct http_request *request)
     struct file *fp;
     char buf[SEND_BUFFER_SIZE] = {0};
     char request_url[REQUEST_URL_SIZE] = {0};
-    char *response;
+    const char *response;
 
     request->dir_context.actor = tracedir;
     memset(request->cache_buffer, 0, CACHE_BUFFER_SIZE);
